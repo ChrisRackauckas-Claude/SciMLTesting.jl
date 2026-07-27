@@ -521,6 +521,15 @@ end
         )
         @test kwargs.piracies.treat_as_own ==
             Union{Function, Type}[Vector, identity, length]
+        disabled_kwargs = SciMLTesting._standard_aqua_kwargs(
+            (; piracies = false), [identity]
+        )
+        @test disabled_kwargs.piracies === false
+        enabled_kwargs = SciMLTesting._standard_aqua_kwargs(
+            (; piracies = true), [identity]
+        )
+        @test enabled_kwargs.piracies.treat_as_own ==
+            Union{Function, Type}[identity]
 
         # `jet_broken` with a non-empty report registers exactly one Broken (the
         # `@test_broken isempty(...)`), no failures; and `mode` was dropped (FakeJET's
