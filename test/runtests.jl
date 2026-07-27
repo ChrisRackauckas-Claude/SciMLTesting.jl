@@ -517,9 +517,10 @@ end
         # Standard SciML solver extension hooks are accepted centrally, while caller
         # supplied Aqua hooks remain present.
         kwargs = SciMLTesting._standard_aqua_kwargs(
-            (; piracies = (; treat_as_own = [identity])), [length, identity]
+            (; piracies = (; treat_as_own = [Vector, identity])), [length, identity]
         )
-        @test kwargs.piracies.treat_as_own == [identity, length]
+        @test kwargs.piracies.treat_as_own ==
+            Union{Function, Type}[Vector, identity, length]
 
         # `jet_broken` with a non-empty report registers exactly one Broken (the
         # `@test_broken isempty(...)`), no failures; and `mode` was dropped (FakeJET's
