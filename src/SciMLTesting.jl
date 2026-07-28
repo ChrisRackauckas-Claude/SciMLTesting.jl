@@ -836,7 +836,9 @@ end
 function _standard_aqua_kwargs(aqua_kwargs, extension_functions = _solver_extension_functions())
     kwargs = NamedTuple(aqua_kwargs)
     isempty(extension_functions) && return kwargs
-    piracies = NamedTuple(get(kwargs, :piracies, (;)))
+    piracies = get(kwargs, :piracies, (;))
+    piracies === false && return kwargs
+    piracies = piracies === true ? (;) : NamedTuple(piracies)
     treat_as_own = Union{Function, Type}[]
     existing = get(piracies, :treat_as_own, ())
     existing === nothing || append!(treat_as_own, existing)
