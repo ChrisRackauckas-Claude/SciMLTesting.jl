@@ -612,6 +612,43 @@ function with_clean_persistent_tasks_sources(f; verbose::Bool = false)
     end
 end
 
+# Aqua runs its ambiguity detector in a clean Julia process. Preserve a caller's QA
+# environment when it declares Aqua directly; otherwise give the child an isolated
+# environment whose manifest resolves SciMLTesting's installed Aqua dependency.
+function _with_aqua_dependency_load_path(f)
+    _active_project_declares_dependency(:Aqua) && return f()
+
+    aqua_root = pkgdir(Aqua)
+    aqua_root === nothing && return f()
+    original_load_path = copy(LOAD_PATH)
+    original_project = Base.active_project()
+    return mktempdir() do environment
+        try
+            Pkg.activate(environment; io = devnull)
+            Pkg.develop(path = aqua_root; io = devnull)
+        finally
+            original_project === nothing ? Pkg.activate(; io = devnull) :
+                Pkg.activate(original_project; io = devnull)
+        end
+
+        pushfirst!(LOAD_PATH, environment)
+        try
+            return f()
+        finally
+            empty!(LOAD_PATH)
+            append!(LOAD_PATH, original_load_path)
+        end
+    end
+end
+
+function _active_project_declares_dependency(name::Symbol)
+    project_file = Base.active_project()
+    (project_file === nothing || !isfile(project_file)) && return false
+    project = TOML.parsefile(project_file)
+    deps = get(project, "deps", nothing)
+    return deps isa AbstractDict && haskey(deps, string(name))
+end
+
 # For every dep of the active environment whose installed Project.toml declares a
 # `[sources]` table with at least one *broken* path entry (a `path =` whose resolved
 # location does not exist), back up the file (bytes + mode) and rewrite it with only
@@ -746,6 +783,11 @@ removed. Set `clean_sources = false` to opt out (e.g. on Julia < 1.11, where the
 does not apply; the wrap is a cheap no-op there since no installed `[sources]` paths
 are broken in a single-package checkout, but the flag makes the intent explicit).
 
+The persistent-task check remains enabled by default with a 60-second allowance.
+This distinguishes a real persistent task from cold precompilation of a large package
+graph, while callers may pass `aqua_kwargs = (; persistent_tasks = (; tmax = ...))`
+to use a different allowance.
+
 This replaces the per-repo `qa.jl`/`jet.jl` bodies that all call
 `Aqua.test_all(pkg)` and `JET.test_package(pkg; target_modules = (pkg,), mode = :typo)`.
 
@@ -796,8 +838,10 @@ pre-1.6 behavior.
 # per-repo qa.jl collapses to `explicit_imports = true` plus the genuinely per-repo
 # kwargs (the ignore-lists). Aqua + ExplicitImports both run here:
 using SciMLTesting, MyPackage
-run_qa(MyPackage;
-    ei_kwargs = (; all_qualified_accesses_are_public = (; ignore = (:internal_dep_name,))))
+run_qa(
+    MyPackage;
+    ei_kwargs = (; all_qualified_accesses_are_public = (; ignore = (:internal_dep_name,)))
+)
 
 # Add the JET check by `using JET` (its weakdep extension auto-registers it):
 using SciMLTesting, JET, MyPackage
@@ -817,10 +861,12 @@ run_qa(MyPackage; Aqua = Aqua, JET = JET, jet = true)
 # A repo with a tracked Aqua ambiguities finding, JET known-broken, and one EI check
 # known-broken — preserve the suppressions while converting its hand-rolled qa.jl:
 using SciMLTesting, JET, MyPackage
-run_qa(MyPackage;
+run_qa(
+    MyPackage;
     aqua_broken = (:ambiguities,),   # placeholder: remove when the issue closes
     jet_broken = true,               # auto-flags Unexpected Pass once JET is clean
-    ei_broken = (:no_implicit_imports,))  # auto-flags once the check passes
+    ei_broken = (:no_implicit_imports,)
+)  # auto-flags once the check passes
 ```
 """
 function run_qa(
@@ -871,7 +917,10 @@ function run_qa(
                 end
                 nothing
             end
-            clean_sources ? with_clean_persistent_tasks_sources(run_aqua) : run_aqua()
+            run_aqua_with_dependencies = () -> _with_aqua_dependency_load_path(run_aqua)
+            clean_sources ?
+                with_clean_persistent_tasks_sources(run_aqua_with_dependencies) :
+                run_aqua_with_dependencies()
         end
         if jet
             if jet_broken
@@ -914,8 +963,21 @@ function _solver_extension_functions()
     return unique(functions)
 end
 
-function _standard_aqua_kwargs(aqua_kwargs, extension_functions = _solver_extension_functions())
+const DEFAULT_PERSISTENT_TASKS_KWARGS = (; tmax = 60)
+
+function _standard_persistent_tasks_kwargs(aqua_kwargs)
     kwargs = NamedTuple(aqua_kwargs)
+    persistent_tasks = get(kwargs, :persistent_tasks, (;))
+    persistent_tasks === false && return kwargs
+    persistent_tasks isa NamedTuple || return kwargs
+    return merge(
+        kwargs,
+        (; persistent_tasks = merge(DEFAULT_PERSISTENT_TASKS_KWARGS, persistent_tasks)),
+    )
+end
+
+function _standard_aqua_kwargs(aqua_kwargs, extension_functions = _solver_extension_functions())
+    kwargs = _standard_persistent_tasks_kwargs(aqua_kwargs)
     isempty(extension_functions) && return kwargs
     piracies = get(kwargs, :piracies, (;))
     piracies === false && return kwargs
@@ -950,8 +1012,22 @@ function _generated_enum_modules(pkg::Module)
     return Tuple(modules)
 end
 
+const BASE_BROADCAST_EXTENSION_HOOKS = (
+    :Broadcasted, :broadcastable, :dotview, :materialize!,
+)
+
 function _explicit_imports_kwargs(pkg::Module, name::Symbol, ei_kwargs)
     kwargs = NamedTuple(get(ei_kwargs, name, (;)))
+    if name === :all_qualified_accesses_are_public
+        # Julia's broadcast-extension protocol has no public spelling: packages must
+        # dispatch on these Base hooks to support dotted assignment and broadcasting.
+        # Keep that language-level exception here, rather than requiring every package
+        # to carry the same per-repository ExplicitImports ignore list.
+        kwargs = merge(
+            kwargs,
+            (; ignore = (get(kwargs, :ignore, ())..., BASE_BROADCAST_EXTENSION_HOOKS...)),
+        )
+    end
     name in (:no_implicit_imports, :no_stale_explicit_imports) || return kwargs
     generated_enums = _generated_enum_modules(pkg)
     isempty(generated_enums) && return kwargs
@@ -974,6 +1050,10 @@ so this helper stays usable with any compatible module. `ei_kwargs`
 is a `NamedTuple` keyed by each check's short name (the part after `check_`); its
 value is that check's keyword arguments, so callers curate per-check ignore-lists,
 e.g. `ei_kwargs = (; all_qualified_accesses_are_public = (; ignore = (:foo,)))`.
+SciMLTesting itself ignores Base's `Broadcasted`, `broadcastable`, `dotview`, and
+`materialize!` for the public-access check: they are required Julia broadcast
+extension hooks but Base does not declare them public. This global exception does not
+cover dependency-owned names.
 EnumX-generated child modules are automatically excluded from the two source-analysis
 checks: they contain macro-generated enum bindings but no package-authored imports to
 analyze.
@@ -1094,8 +1174,7 @@ end
 # Whether `pkg.name` resolves to a docstring. Binding lookup follows imported names
 # to their defining modules. A binding with no unique owner is not documentable.
 @static if VERSION >= v"1.11"
-    function _has_docstring(pkg::Module, name::Symbol)
-        isdefined(pkg, name) || return false
+    function _binding_has_docstring(pkg::Module, name::Symbol)
         return try
             Base.Docs.hasdoc(pkg, name)
         catch
@@ -1103,8 +1182,7 @@ end
         end
     end
 else
-    function _has_docstring(pkg::Module, name::Symbol)
-        isdefined(pkg, name) || return false
+    function _binding_has_docstring(pkg::Module, name::Symbol)
         ref = Expr(:., pkg, QuoteNode(name))
         call = Expr(
             :macrocall, GlobalRef(Base.Docs, Symbol("@doc")), LineNumberNode(0), ref
@@ -1129,6 +1207,17 @@ function _is_external_module_reexport(pkg::Module, name::Symbol)
     end
     value isa Module || return false
     return !_is_within_module(value, pkg)
+end
+
+function _has_docstring(pkg::Module, name::Symbol)
+    isdefined(pkg, name) || return false
+    _binding_has_docstring(pkg, name) && return true
+    owner = try
+        which(pkg, name)
+    catch
+        return false
+    end
+    return owner !== pkg && _binding_has_docstring(owner, name)
 end
 
 # Only names owned by this package's module hierarchy require a local rendered API
@@ -1199,6 +1288,17 @@ function _rendered_doc_names(docs_src::AbstractString)
     return (rendered, autodocs)
 end
 
+function _docs_project_declares(docs_src, package_name)
+    project_file = joinpath(dirname(docs_src), "Project.toml")
+    isfile(project_file) || return nothing
+    project = try
+        TOML.parsefile(project_file)
+    catch
+        return false
+    end
+    return haskey(get(project, "deps", Dict{String, Any}()), package_name)
+end
+
 function _find_docs_src(package_root, package_name)
     local_docs = joinpath(package_root, "docs", "src")
     isdir(local_docs) && return local_docs
@@ -1206,18 +1306,33 @@ function _find_docs_src(package_root, package_name)
     library_dir = dirname(package_root)
     repository_root = dirname(library_dir)
     repository_docs = joinpath(repository_root, "docs", "src")
-    if basename(library_dir) == "lib" && basename(package_root) == package_name &&
-            isfile(joinpath(repository_root, "Project.toml")) && isdir(repository_docs)
-        return repository_docs
-    end
+    is_monorepo_package = basename(library_dir) == "lib" &&
+        basename(package_root) == package_name &&
+        isfile(joinpath(repository_root, "Project.toml"))
+    is_monorepo_package || return local_docs
 
-    return local_docs
+    repository_docs_declares = isdir(repository_docs) ?
+        _docs_project_declares(repository_docs, package_name) : nothing
+    (repository_docs_declares === true || repository_docs_declares === nothing) &&
+        isdir(repository_docs) && return repository_docs
+
+    documented_by = String[]
+    for sibling in readdir(library_dir)
+        sibling_docs = joinpath(library_dir, sibling, "docs", "src")
+        isdir(sibling_docs) || continue
+        _docs_project_declares(sibling_docs, package_name) === true &&
+            push!(documented_by, sibling_docs)
+    end
+    length(documented_by) == 1 && return only(documented_by)
+
+    return isdir(repository_docs) ? repository_docs : local_docs
 end
 
 # Default docs source dir for a package. Packages normally use <pkgroot>/docs/src. A
 # conventional monorepo subpackage at `lib/<PackageName>` instead uses the repository
-# manual. This makes plain run_qa(package) work without package-specific paths or
-# `[sources]` declarations, while refusing unrelated ancestor manuals.
+# manual, or the unique sibling manual whose docs project declares that package. This
+# makes plain run_qa(package) work without package-specific paths or `[sources]`
+# declarations, while refusing unrelated ancestor manuals.
 _default_docs_src(pkg::Module) =
     (root = pkgdir(pkg); root === nothing ? "" : _find_docs_src(root, String(nameof(pkg))))
 
@@ -1624,10 +1739,12 @@ function _run_folder_group(
 end
 
 """
-    run_tests(; core, groups = Dict(), qa = nothing,
-              env = "GROUP", default = "All", sublib_env = env,
-              all = nothing, umbrellas = Dict(),
-              lib_dir = nothing, parent = nothing, pkg = nothing)
+    run_tests(;
+        core, groups = Dict(), qa = nothing,
+        env = "GROUP", default = "All", sublib_env = env,
+        all = nothing, umbrellas = Dict(),
+        lib_dir = nothing, parent = nothing, pkg = nothing
+    )
 
 Declarative top-level dispatcher for a SciML `test/runtests.jl`. It owns the whole
 group-routing control flow, so a repo replaces its hand-written `if GROUP == "All"
@@ -1820,10 +1937,12 @@ test bodies themselves load, e.g. `Aqua`/`JET` in the QA sub-env). This removes 
 using SciMLTesting
 run_tests(;
     core = joinpath(@__DIR__, "core_tests.jl"),
-    qa = (; env = "qa", body = () -> begin
-        using Aqua, MyPackage
-        run_qa(MyPackage)
-    end),
+    qa = (;
+        env = "qa", body = () -> begin
+            using Aqua, MyPackage
+            run_qa(MyPackage)
+        end,
+    ),
 )
 
 # monorepo root: test/runtests.jl
@@ -1838,16 +1957,16 @@ run_tests(;
 run_tests(;
     core = joinpath(@__DIR__, "core_tests.jl"),
     groups = Dict(
-        "InterfaceI"  => joinpath(@__DIR__, "interface_i.jl"),
+        "InterfaceI" => joinpath(@__DIR__, "interface_i.jl"),
         "InterfaceII" => joinpath(@__DIR__, "interface_ii.jl"),
-        "Regression_I"  => joinpath(@__DIR__, "regression_i.jl"),
+        "Regression_I" => joinpath(@__DIR__, "regression_i.jl"),
         "Regression_II" => joinpath(@__DIR__, "regression_ii.jl"),
         "AlgConvergence_I" => joinpath(@__DIR__, "alg_i.jl"),
     ),
     qa = (; env = "qa", body = joinpath(@__DIR__, "qa", "qa.jl")),
     all = ["InterfaceI", "InterfaceII", "Regression_I", "Regression_II"],
     umbrellas = Dict(
-        "Interface"  => ["InterfaceI", "InterfaceII"],
+        "Interface" => ["InterfaceI", "InterfaceII"],
         "Regression" => ["Regression_I", "Regression_II"],
     ),
     sublib_env = "ODEDIFFEQ_TEST_GROUP",
