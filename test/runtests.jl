@@ -219,10 +219,7 @@ module ScopedAutoDocsFixture
     struct ScopedDocumentedType end
 end
 
-module RealJETFixture
-    export real_jet_identity
-    real_jet_identity(x) = x
-end
+include(joinpath(@__DIR__, "fixtures", "real_jet_fixture.jl"))
 
 # Reexports an undocumented external module and an undocumented external function
 # next to an undocumented local name, so the docstrings check can be shown to exempt
