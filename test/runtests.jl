@@ -219,9 +219,15 @@ module ScopedAutoDocsFixture
     struct ScopedDocumentedType end
 end
 
-module RealJETFixture
-    export real_jet_identity
-    real_jet_identity(x) = x
+const REAL_JET_FIXTURE_PATH = joinpath(@__DIR__, "fixtures", "RealJETFixture")
+const REAL_JET_FIXTURE_PKGID = Base.PkgId(
+    Base.UUID("d0f5c5f0-7c1e-4f9c-9df0-5d2d2a4e6a11"),
+    "RealJETFixture",
+)
+
+function _load_real_jet_fixture()
+    Pkg.activate(REAL_JET_FIXTURE_PATH; io = devnull)
+    return Base.require(REAL_JET_FIXTURE_PKGID)
 end
 
 # Reexports an undocumented external module and an undocumented external function
@@ -610,13 +616,21 @@ end
     @testset "real JET target_defined_modules precedence" begin
         # Newer supported JET versions removed the legacy keyword, so FakeJET checks
         # forwarding of that key above while real JET checks the resulting target path.
-        effective = SciMLTesting._standard_jet_kwargs(
-            RealJETFixture, (; target_defined_modules = false)
-        )
-        @test effective.target_modules == (RealJETFixture,)
-        JET.test_package(
-            RealJETFixture; mode = effective.mode, target_modules = effective.target_modules
-        )
+        original_project = Base.active_project()
+        try
+            RealJETFixture = _load_real_jet_fixture()
+            effective = SciMLTesting._standard_jet_kwargs(
+                RealJETFixture, (; target_defined_modules = false)
+            )
+            @test effective.target_modules == (RealJETFixture,)
+            JET.test_package(
+                RealJETFixture;
+                mode = effective.mode,
+                target_modules = effective.target_modules,
+            )
+        finally
+            Pkg.activate(original_project; io = devnull)
+        end
     end
 
     @testset "Aqua ambiguity subprocess resolves SciMLTesting dependencies" begin
