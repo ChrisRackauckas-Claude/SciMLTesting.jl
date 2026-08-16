@@ -305,9 +305,9 @@ and `test/qa/qa.jl`:
 ```julia
 using SciMLTesting, JET, MyPackage
 
-# Aqua + ExplicitImports come from SciMLTesting's deps; `using JET` turns the JET
-# check on. The per-repo qa.jl collapses to `explicit_imports = true` plus the
-# genuinely-per-repo kwargs (the ExplicitImports per-check ignore-lists).
+# Aqua and ExplicitImports come from SciMLTesting's dependencies; `using JET`
+# turns the JET check on. The strict public-API, rendered-doc, explicit-import,
+# and reexport checks are enabled by default.
 run_qa(MyPackage;
     ei_kwargs = (; all_qualified_accesses_are_public = (; ignore = (:internal_dep_name,))))
 ```
@@ -318,21 +318,18 @@ Several SciML repos had grown a hand-copied `test/QA/public_api_docs.jl` asserti
 every exported name has a docstring (and is rendered in the manual). `run_api_docs`
 replaces those per-repo files with one shared, maintained helper. It runs **by default
 inside `run_qa`** (`api_docs = true`), so a plain `run_qa(MyPackage)` already enforces
-the docstring and rendered-manual checks — configure it with `api_docs_kwargs`, or pass `api_docs = false` to
-skip:
+the docstring and rendered-manual checks. Package QA should add missing docs rather
+than opt out:
 
 ```julia
 using SciMLTesting, MyPackage
 
-# In the QA body — the docstring check runs by default:
+# In the QA body — docstrings, rendered docs, explicit imports, and reexports
+# are all checked by default:
 run_qa(MyPackage)
 
-# A package without a local manual can explicitly opt out of rendered checks:
-run_qa(MyPackage; api_docs_kwargs = (; rendered = false))
-
 # Standalone (outside run_qa), e.g. as its own QA file:
-run_api_docs(MyPackage)                     # every public name is documented
-run_api_docs(MyPackage; rendered = false)   # docstrings only
+run_api_docs(MyPackage)                     # docstrings and rendered docs
 ```
 
   * **`docstrings`** (default `true`) — every name in `public_api_names(pkg)` has a
@@ -341,8 +338,9 @@ run_api_docs(MyPackage; rendered = false)   # docstrings only
     dependency re-exports.
   * **`rendered`** (default `true`) — every public name except re-exported dependency
     modules appears in a ` ```@docs ` block under `docs_src` (defaults to
-    `<pkgroot>/docs/src`). A ` ```@autodocs ` block satisfies it wholesale. Packages
-    without a resolvable local manual must explicitly pass `rendered = false`.
+    `<pkgroot>/docs/src`). A ` ```@autodocs ` block satisfies it wholesale. A package
+    without a resolvable local manual must add one; `rendered = false` is a migration
+    and fixture escape hatch, not a production-package QA configuration.
   * **`ignore` / `rendered_ignore`** — names to exclude (e.g. an un-documentable
     re-export), with a comment pointing at the tracking issue.
   * **`docstrings_broken` / `rendered_broken`** — mark the check `@test_broken` for a
