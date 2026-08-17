@@ -1658,9 +1658,10 @@ Two checks, each its own nested `@testset`:
     `rendered_ignore`.
 
 `docs_src` defaults to `<pkgroot>/docs/src` located via `pkgdir(pkg)`. For a
-conventional monorepo subpackage at `lib/<PackageName>`, it also discovers the
-repository-level `docs/src`. Both layouts therefore use plain `run_qa(MyPackage)`
-without repository-specific paths or `[sources]` declarations.
+subpackage listed in an ancestor Julia `[workspace].projects` array, including
+conventional `lib/<PackageName>` and `<PackageName>.jl` layouts, it also discovers
+the repository-level `docs/src`. These layouts therefore use plain
+`run_qa(MyPackage)` without repository-specific paths or `[sources]` declarations.
 
 `ignore` (for the docstring check) and `rendered_ignore` (for the rendered check) are
 collections of names (`Symbol`s) to exclude — use them for names that legitimately
