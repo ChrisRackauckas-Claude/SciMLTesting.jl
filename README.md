@@ -338,9 +338,10 @@ run_api_docs(MyPackage)                     # docstrings and rendered docs
     dependency re-exports.
   * **`rendered`** (default `true`) — every public name except re-exported dependency
     modules appears in a ` ```@docs ` block under `docs_src` (defaults to
-    `<pkgroot>/docs/src`). A ` ```@autodocs ` block satisfies it wholesale. A package
-    without a resolvable local manual must add one; `rendered = false` is a migration
-    and fixture escape hatch, not a production-package QA configuration.
+    `<pkgroot>/docs/src`). A scoped ` ```@autodocs ` block satisfies it only for the
+    modules, pages, and filters it can resolve. A package without a resolvable local
+    manual must add one; `rendered = false` is a migration and fixture escape hatch,
+    not a production-package QA configuration.
   * **`ignore` / `rendered_ignore`** — names to exclude (e.g. an un-documentable
     re-export), with a comment pointing at the tracking issue.
   * **`docstrings_broken` / `rendered_broken`** — mark the check `@test_broken` for a

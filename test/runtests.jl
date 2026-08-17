@@ -1353,6 +1353,17 @@ end
             "[deps]\nApiFixture = \"00000000-0000-0000-0000-000000000001\"\n",
         )
         @test SciMLTesting._find_docs_src(package_root, "ApiFixture") == sibling_docs
+
+        workspace = mktempdir()
+        workspace_package = joinpath(workspace, "ApiFixture.jl")
+        mkpath(workspace_package)
+        workspace_docs = joinpath(workspace, "docs", "src")
+        mkpath(workspace_docs)
+        write(
+            joinpath(workspace, "Project.toml"),
+            "[workspace]\nprojects = [\"ApiFixture.jl\"]\n",
+        )
+        @test SciMLTesting._find_docs_src(workspace_package, "ApiFixture") == workspace_docs
     end
 
     @testset "run_api_docs docstrings check" begin

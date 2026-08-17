@@ -1551,17 +1551,46 @@ function _docs_project_declares(docs_src, package_name)
     return haskey(get(project, "deps", Dict{String, Any}()), package_name)
 end
 
+function _workspace_root_for_package(package_root)
+    package_root = normpath(package_root)
+    current = dirname(package_root)
+    while true
+        project_file = joinpath(current, "Project.toml")
+        if isfile(project_file)
+            project = try
+                TOML.parsefile(project_file)
+            catch
+                nothing
+            end
+            if project !== nothing
+                workspace = get(project, "workspace", nothing)
+                projects = workspace isa AbstractDict ? get(workspace, "projects", ()) : ()
+                any(
+                    normpath(joinpath(current, String(path))) == package_root
+                        for path in projects
+                ) && return current
+            end
+        end
+        parent = dirname(current)
+        parent == current && return nothing
+        current = parent
+    end
+    return
+end
+
 function _find_docs_src(package_root, package_name)
     local_docs = joinpath(package_root, "docs", "src")
     isdir(local_docs) && return local_docs
 
     library_dir = dirname(package_root)
-    repository_root = dirname(library_dir)
-    repository_docs = joinpath(repository_root, "docs", "src")
+    lib_repository_root = dirname(library_dir)
     is_monorepo_package = basename(library_dir) == "lib" &&
         basename(package_root) == package_name &&
-        isfile(joinpath(repository_root, "Project.toml"))
-    is_monorepo_package || return local_docs
+        isfile(joinpath(lib_repository_root, "Project.toml"))
+    workspace_root = _workspace_root_for_package(package_root)
+    repository_root = is_monorepo_package ? lib_repository_root : workspace_root
+    repository_root === nothing && return local_docs
+    repository_docs = joinpath(repository_root, "docs", "src")
 
     repository_docs_declares = isdir(repository_docs) ?
         _docs_project_declares(repository_docs, package_name) : nothing
@@ -1630,9 +1659,10 @@ Two checks, each its own nested `@testset`:
     `rendered_ignore`.
 
 `docs_src` defaults to `<pkgroot>/docs/src` located via `pkgdir(pkg)`. For a
-conventional monorepo subpackage at `lib/<PackageName>`, it also discovers the
-repository-level `docs/src`. Both layouts therefore use plain `run_qa(MyPackage)`
-without repository-specific paths or `[sources]` declarations.
+subpackage listed in an ancestor Julia `[workspace].projects` array, including
+conventional `lib/<PackageName>` and `<PackageName>.jl` layouts, it also discovers
+the repository-level `docs/src`. These layouts therefore use plain
+`run_qa(MyPackage)` without repository-specific paths or `[sources]` declarations.
 
 `ignore` (for the docstring check) and `rendered_ignore` (for the rendered check) are
 collections of names (`Symbol`s) to exclude — use them for names that legitimately
