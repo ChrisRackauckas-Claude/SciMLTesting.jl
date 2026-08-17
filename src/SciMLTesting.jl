@@ -1567,7 +1567,7 @@ function _workspace_root_for_package(package_root)
                 projects = workspace isa AbstractDict ? get(workspace, "projects", ()) : ()
                 any(
                     normpath(joinpath(current, String(path))) == package_root
-                    for path in projects
+                        for path in projects
                 ) && return current
             end
         end
@@ -1575,6 +1575,7 @@ function _workspace_root_for_package(package_root)
         parent == current && return nothing
         current = parent
     end
+    return
 end
 
 function _find_docs_src(package_root, package_name)
