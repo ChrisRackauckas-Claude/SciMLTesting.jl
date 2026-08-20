@@ -63,6 +63,7 @@ module FakeExplicitImports
     using Test: @test
     import ..SciMLTesting
     const FINDINGS = Ref{Vector{Symbol}}(Symbol[])
+    const CHECK_CALLS = Ref(0)
     const PUBLIC_CALLED = Ref(false)   # set when a public-API check stub runs (gated to >= 1.11)
     _short(f::Symbol) = Symbol(replace(String(f), "check_" => ""))
     _result(f::Symbol) = _short(f) in FINDINGS[] ? "<finding>" : nothing
@@ -71,10 +72,11 @@ module FakeExplicitImports
             :check_all_explicit_imports_via_owners, :check_all_qualified_accesses_via_owners,
             :check_all_explicit_imports_are_public,
         )
-        @eval $f(pkg; kwargs...) = (@test pkg === SciMLTesting; _result($(QuoteNode(f))))
+        @eval $f(pkg; kwargs...) = (@test pkg === SciMLTesting; CHECK_CALLS[] += 1; _result($(QuoteNode(f))))
     end
     function check_all_qualified_accesses_are_public(pkg; ignore = (), kwargs...)
         PUBLIC_CALLED[] = true
+        CHECK_CALLS[] += 1
         @test pkg === SciMLTesting
         @test ignore == (
             :internal_thing, :Broadcasted, :broadcastable, :dotview, :materialize!,
@@ -534,11 +536,13 @@ end
         )
 
         # Aqua + ExplicitImports (standard + public-API); per-check ignore-list routed via ei_kwargs.
+        FakeExplicitImports.CHECK_CALLS[] = 0
         run_qa(
             SciMLTesting; Aqua = FakeAqua, JET = nothing, ExplicitImports = FakeExplicitImports,
             api_docs = false,
             ei_kwargs = (; all_qualified_accesses_are_public = (; ignore = (:internal_thing,)))
         )
+        @test FakeExplicitImports.CHECK_CALLS[] == (VERSION >= v"1.11" ? 6 : 4)
         # The direct helper.
         run_explicit_imports(
             SciMLTesting, FakeExplicitImports;
@@ -1573,6 +1577,12 @@ end
         @test c[:fail] == 0 && c[:error] == 0 && c[:pass] == 1
         @test :SciMLTesting in public_api_names(ModuleReexportFixture)
         @test !SciMLTesting._requires_local_rendering(ModuleReexportFixture, :SciMLTesting)
+
+        # The standalone defaults run both the docstring and rendered checks.
+        c = counts_of() do
+            run_api_docs(ScopedAutoDocsFixture; docs_src = rsrc)
+        end
+        @test c[:pass] == 1 && c[:fail] == 1 && c[:error] == 0
 
         c = counts_of() do
             run_api_docs(FunctionReexportFixture; docstrings = false, docs_src = rsrc)
