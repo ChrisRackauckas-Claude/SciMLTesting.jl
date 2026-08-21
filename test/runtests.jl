@@ -1219,6 +1219,9 @@ end
         @test SciMLTesting._doc_entry_name("Base.SubMod.bar") == :bar
         @test SciMLTesting._doc_entry_name("@mac") == Symbol("@mac")
         @test SciMLTesting._doc_entry_name("MyPkg.@mac") == Symbol("@mac")
+        @test SciMLTesting._doc_entry_name("MyPkg.:<ₑ") == Symbol("<ₑ")
+        @test SciMLTesting._doc_entry_name("Base.:+") == :+
+        @test SciMLTesting._doc_entry_name("Base.:(+)") == :+
     end
 
     @testset "public_reexports" begin
