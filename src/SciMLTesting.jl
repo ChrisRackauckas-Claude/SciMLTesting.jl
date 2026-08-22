@@ -1265,12 +1265,22 @@ end
 # entry is a name, optionally module-qualified and/or with a call signature, e.g.
 # `foo`, `MyPkg.foo`, `foo(x::Int)`, `MyPkg.@mac`. Take the first whitespace token,
 # drop a call-signature suffix, then drop a leading module qualifier (the text after
-# the last dot), preserving a leading `@` for macros.
+# the last dot), preserving a leading `@` for macros. Julia permits qualified
+# operator bindings in both `MyPkg.:op` and `MyPkg.:(op)` forms; normalize those
+# delimiters so the result matches the operator's binding name.
 function _doc_entry_name(line::AbstractString)
     tok = String(first(split(line)))
-    tok = String(first(split(tok, '(')))
+    # Parentheses in `:(op)` are part of the qualified operator syntax, not a
+    # call signature. All other parentheses begin a signature that should be
+    # ignored for the rendered-name comparison.
+    occursin(":(", tok) || (tok = String(first(split(tok, '('))))
     dot = findlast('.', tok)
     dot === nothing || (tok = tok[nextind(tok, dot):end])
+    if startswith(tok, ":(") && endswith(tok, ")")
+        tok = tok[3:(end - 1)]
+    elseif startswith(tok, ":")
+        tok = tok[nextind(tok, firstindex(tok)):end]
+    end
     return Symbol(tok)
 end
 
