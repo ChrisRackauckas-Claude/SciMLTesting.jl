@@ -1796,7 +1796,7 @@ end
                 reexports_allow = (:OwnedModule, :owned_function),
             )
         end
-        @test c[:pass] == 2 && c[:fail] == 0 && c[:error] == 0
+        @test c[:pass] == 1 && c[:fail] == 1 && c[:error] == 0
 
         c = counts_of() do
             run_qa(

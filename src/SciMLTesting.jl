@@ -775,8 +775,8 @@ document a repo's public API, or curate exceptions via `api_docs_kwargs` (`ignor
 forwarded to [`run_api_docs`](@ref) (e.g. `rendered`, `ignore`, `docstrings_broken`).
 `explicit_imports` and `check_reexports` default to **`true`**. Packages with unavoidable
 dependency exceptions provide their per-check ignore-lists through `ei_kwargs`, while
-facade packages list intentional public reexports in `reexports_allow`; those approved
-external bindings are automatically excluded from the local source-docstring check.
+facade packages list intentional public reexports in `reexports_allow`. Approval permits
+the facade binding but does not waive documentation checks on the definition's owner.
 Setting an enable flag `true` while its module is unavailable is a configuration error
 and throws an `ArgumentError`. The whole thing runs inside a `@testset` named `testset`.
 
@@ -942,15 +942,7 @@ function run_qa(
             end
         end
         explicit_imports && run_explicit_imports(pkg, ExplicitImports; ei_kwargs, ei_broken)
-        allowed_reexports = Set(Symbol.(reexports_allow))
-        approved_reexports = filter(
-            name -> name in allowed_reexports, public_reexports(pkg)
-        )
-        effective_api_docs_kwargs = merge(
-            api_docs_kwargs,
-            (; ignore = (get(api_docs_kwargs, :ignore, ())..., approved_reexports...)),
-        )
-        api_docs && run_api_docs(pkg; effective_api_docs_kwargs...)
+        api_docs && run_api_docs(pkg; api_docs_kwargs...)
         if check_reexports
             reexported = public_reexports(pkg; allow = reexports_allow)
             @testset "No unapproved public reexports" begin
