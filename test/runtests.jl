@@ -1784,6 +1784,19 @@ end
             )
         end
         @test c[:pass] == 1 && c[:fail] == 0 && c[:error] == 0
+
+        c = counts_of() do
+            run_qa(
+                UndocumentedModuleReexportFixture;
+                Aqua = nothing,
+                JET = nothing,
+                ExplicitImports = nothing,
+                explicit_imports = false,
+                api_docs_kwargs = (; rendered = false, ignore = (:local_undocumented,)),
+                reexports_allow = (:OwnedModule, :owned_function),
+            )
+        end
+        @test c[:pass] == 2 && c[:fail] == 0 && c[:error] == 0
     end
 
     @testset "run_tests routing" begin
