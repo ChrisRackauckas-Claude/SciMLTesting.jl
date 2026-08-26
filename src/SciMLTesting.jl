@@ -942,9 +942,13 @@ function run_qa(
             end
         end
         explicit_imports && run_explicit_imports(pkg, ExplicitImports; ei_kwargs, ei_broken)
+        allowed_reexports = Set(Symbol.(reexports_allow))
+        approved_reexports = filter(
+            name -> name in allowed_reexports, public_reexports(pkg)
+        )
         effective_api_docs_kwargs = merge(
             api_docs_kwargs,
-            (; ignore = (get(api_docs_kwargs, :ignore, ())..., reexports_allow...)),
+            (; ignore = (get(api_docs_kwargs, :ignore, ())..., approved_reexports...)),
         )
         api_docs && run_api_docs(pkg; effective_api_docs_kwargs...)
         if check_reexports
