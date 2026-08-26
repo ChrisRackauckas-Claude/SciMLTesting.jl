@@ -758,8 +758,10 @@ Each tool runs if it is both available and enabled:
   * `ExplicitImports` + `explicit_imports` ⇒ ExplicitImports' standard + public-API
     checks (see [`run_explicit_imports`](@ref)).
   * `api_docs` ⇒ the public-API documentation check (see [`run_api_docs`](@ref)): every
-    exported/`public` name has a docstring and every locally rendered name appears in
-    the manual unless `api_docs_kwargs` explicitly sets `rendered = false`.
+    package-owned exported/`public` name has a docstring and every locally rendered name
+    appears in the manual unless `api_docs_kwargs` explicitly sets `rendered = false`.
+    Names approved through `reexports_allow` remain the owning package's documentation
+    responsibility.
   * `check_reexports` ⇒ fail when the package publicly exposes a binding or alias
     owned outside its module hierarchy, except names listed in `reexports_allow`.
 
@@ -773,9 +775,10 @@ document a repo's public API, or curate exceptions via `api_docs_kwargs` (`ignor
 forwarded to [`run_api_docs`](@ref) (e.g. `rendered`, `ignore`, `docstrings_broken`).
 `explicit_imports` and `check_reexports` default to **`true`**. Packages with unavoidable
 dependency exceptions provide their per-check ignore-lists through `ei_kwargs`, while
-facade packages list intentional public reexports in `reexports_allow`. Setting an enable
-flag `true` while its module is unavailable is a configuration error and throws an `ArgumentError`. The
-whole thing runs inside a `@testset` named `testset`.
+facade packages list intentional public reexports in `reexports_allow`. Approval permits
+the facade binding but does not waive documentation checks on the definition's owner.
+Setting an enable flag `true` while its module is unavailable is a configuration error
+and throws an `ArgumentError`. The whole thing runs inside a `@testset` named `testset`.
 
 `clean_sources` (default `true`) wraps the `Aqua.test_all` call in
 [`with_clean_persistent_tasks_sources`](@ref), which strips *broken* path-`[sources]`
