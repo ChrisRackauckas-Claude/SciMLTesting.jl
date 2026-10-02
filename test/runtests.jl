@@ -931,6 +931,19 @@ using ExplicitImports
         @test ExplicitImports.check_no_stale_explicit_imports(SciMLTesting) === nothing
     end
 
+    @testset "local public replacements for qualified accesses" begin
+        result = ExplicitImports.check_all_qualified_accesses_are_public(
+            SciMLTesting;
+            ignore = SciMLTesting.BASE_BROADCAST_EXTENSION_HOOKS,
+            throw = false,
+        )
+        flagged = result === nothing ? Symbol[] :
+            Symbol[row.name for row in result.bad_imports]
+        @test !(:eval in flagged)
+        @test !(:structdiff in flagged)
+        @test !(:parseall in flagged)
+    end
+
     @testset "generated enum modules are excluded from source analysis" begin
         @test SciMLTesting._generated_enum_modules(EnumFixture) == (EnumFixture.Generated,)
         kwargs = SciMLTesting._explicit_imports_kwargs(
