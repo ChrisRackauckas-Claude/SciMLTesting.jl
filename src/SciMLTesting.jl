@@ -1036,7 +1036,9 @@ end
 # report call. All other jet_kwargs pass through unchanged.
 function _jet_report_kwargs(jet_kwargs)
     nt = NamedTuple(jet_kwargs)
-    return haskey(nt, :mode) ? Base.structdiff(nt, NamedTuple{(:mode,)}) : nt
+    haskey(nt, :mode) || return nt
+    kept = filter(k -> k !== :mode, keys(nt))
+    return NamedTuple{kept}(nt)
 end
 
 function _generated_enum_modules(pkg::Module)
@@ -1378,7 +1380,7 @@ end
 # closed rather than allowing a partial parser to hide undocumented public API.
 function _parse_autodocs_block(body::AbstractString)
     parsed = try
-        Meta.parseall(body; filename = "autodocs")
+        Meta.parse(string("begin\n", body, "\nend"))
     catch
         return _AutoDocsBlock()
     end
@@ -1909,7 +1911,7 @@ function _run_body(body; label::AbstractString = "Group")
             string(label),
             Expr(:block, Expr(:call, :include, path)),
         )
-        Core.eval(Main, expr)
+        @eval Main $expr
     elseif _callable(body)
         Base.invokelatest(body)
     else
