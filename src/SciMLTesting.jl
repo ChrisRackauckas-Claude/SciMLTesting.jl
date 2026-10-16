@@ -1036,7 +1036,9 @@ end
 # report call. All other jet_kwargs pass through unchanged.
 function _jet_report_kwargs(jet_kwargs)
     nt = NamedTuple(jet_kwargs)
-    return haskey(nt, :mode) ? Base.structdiff(nt, NamedTuple{(:mode,)}) : nt
+    haskey(nt, :mode) || return nt
+    kept = filter(k -> k !== :mode, keys(nt))
+    return NamedTuple{kept}(nt)
 end
 
 function _generated_enum_modules(pkg::Module)
@@ -1377,11 +1379,9 @@ end
 # entry, or any `Filter` — is treated as rendering no names. This deliberately fails
 # closed rather than allowing a partial parser to hide undocumented public API.
 function _parse_autodocs_block(body::AbstractString)
-    parsed = try
-        Meta.parseall(body; filename = "autodocs")
-    catch
-        return _AutoDocsBlock()
-    end
+    # Iterate the public positional `Meta.parse` API over the original body so
+    # top-level expression boundaries match `Meta.parseall` / Documenter: a line
+    # with `;` is one `Expr(:toplevel, ...)` and is not flattened into assignments.
     has_modules = false
     modules = nothing
     pages = String[]
@@ -1389,24 +1389,32 @@ function _parse_autodocs_block(body::AbstractString)
     private = true
     order = _AUTODOCS_DEFAULT_ORDER
     unfiltered = true
-    for ex in parsed.args
-        (ex isa Expr && ex.head === :(=) && ex.args[1] isa Symbol) || continue
-        key = ex.args[1]::Symbol
-        value = ex.args[2]
-        if key === :Modules
-            has_modules = true
-            modules = _autodocs_modules(value)
-        elseif key === :Pages
-            pages = _autodocs_pages(value)
-        elseif key === :Order
-            order = _autodocs_order(value)
-        elseif key === :Public
-            public = value isa Bool ? value : nothing
-        elseif key === :Private
-            private = value isa Bool ? value : nothing
-        elseif key === :Filter
-            unfiltered = false
+    pos = firstindex(body)
+    try
+        while pos <= lastindex(body)
+            ex, next = Meta.parse(body, pos; greedy = true, raise = true)
+            next > pos || break
+            pos = next
+            (ex isa Expr && ex.head === :(=) && ex.args[1] isa Symbol) || continue
+            key = ex.args[1]::Symbol
+            value = ex.args[2]
+            if key === :Modules
+                has_modules = true
+                modules = _autodocs_modules(value)
+            elseif key === :Pages
+                pages = _autodocs_pages(value)
+            elseif key === :Order
+                order = _autodocs_order(value)
+            elseif key === :Public
+                public = value isa Bool ? value : nothing
+            elseif key === :Private
+                private = value isa Bool ? value : nothing
+            elseif key === :Filter
+                unfiltered = false
+            end
         end
+    catch
+        return _AutoDocsBlock()
     end
     has_modules || return nothing
     return _AutoDocsBlock(modules, pages, public, private, order, unfiltered)
@@ -1909,7 +1917,7 @@ function _run_body(body; label::AbstractString = "Group")
             string(label),
             Expr(:block, Expr(:call, :include, path)),
         )
-        Core.eval(Main, expr)
+        @eval Main $expr
     elseif _callable(body)
         Base.invokelatest(body)
     else
